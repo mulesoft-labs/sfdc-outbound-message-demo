@@ -1,0 +1,4 @@
+{Name=TEST Oppty2, Amount=8836.0, Account={AccountNumber=CUST00002, Id={}, type=Account, BillingState=NJ}, Id=006V0000001t52PIAQ, type=Opportunity}
+
+[{ListPrice=8835.0, PricebookEntry={Name=Mule ESB - EE Dev/Test Subscription - Gold (Dual Core CPU), ProductCode=MuleDTGolddc, Id={}, type=PricebookEntry}, End_Date__c=2012-09-30, Quantity=1.0, Category__c=Subscription, Id={}, Start_Date__c=2011-09-30, UnitPrice=8835.0, type=OpportunityLineItem}, {ListPrice=1.0, PricebookEntry={Name=MDI 1x Royalty, ProductCode=MuleMdi1xRoyalty, Id={}, type=PricebookEntry}, End_Date__c=2012-10-20, Quantity=1.0, Category__c=1x Royalty, Id={}, Start_Date__c=2011-10-20, UnitPrice=1.0, type=OpportunityLineItem}]
+INFO  2011-10-21 14:00:35,896 [main] org.mule.construct.FlowConstructLifecycleManager: Stopping flow: TestCustomerOnly

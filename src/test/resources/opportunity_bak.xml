@@ -1,0 +1,91 @@
+	<!-- Main SF Opportunity Query flow. -->
+	<flow name="SFOpportunityQuery">
+		<inbound-endpoint ref="bridge" exchange-pattern="one-way" />
+		<logger message="payload before query = #[payload:]" level="ERROR" />
+		<object-to-string-transformer />
+		<sfdc:query-single
+			query="SELECT Amount, Id, Name, Account.BillingState, Account.AccountNumber, (SELECT Quantity, ListPrice, PricebookEntry.Name, PricebookEntry.ProductCode, UnitPrice, Category__c, Start_Date__c, End_Date__c FROM OpportunityLineItems) FROM Opportunity WHERE Id='#[payload:]'" />
+		<!-- Albin: Cannot get the JAXB object to xml transformer to work here 
+			for some reason. I think it has to do whith that no root element is defined 
+			in the QueryResult java file. -->
+
+		<logger message="payload Right After query = #[payload:]"
+			level="ERROR" />
+		<script:transformer>
+			<script:script engine="groovy">
+			<![CDATA[
+				import javax.xml.bind.*
+				import javax.xml.namespace.QName
+
+				JAXBContext context = JAXBContext.newInstance(payload.class);
+				StringWriter sw = new StringWriter();
+				context.createMarshaller().marshal(new JAXBElement(new QName("urn:sobject.partner.soap.sforce.com","queryresult"),payload.class,payload),sw)
+				return sw.toString()
+				]]>
+			</script:script>
+		</script:transformer>
+		<logger message="payload Before xslt = #[payload:]" level="ERROR" />
+		<transformer ref="querytoinvoice" />
+		<transformer ref="removens" />
+		<object-to-string-transformer />
+		<logger message="payload After xslt = #[payload:]" level="ERROR" />
+
+		<logger
+			message="payload customer ID xslt = #[xpath:create-invoice/customerid]"
+			level="ERROR" />
+
+		<intacct:function controlid="#[string:invoice- #[mule:message.id]]">
+			<intacct:create-sotransaction>
+				<intacct:transactiontype>Sales Invoice</intacct:transactiontype>
+				<intacct:datecreated>
+					<intacct:year>#[xpath:create-invoice/datecreated/year]</intacct:year>
+					<intacct:month>#[xpath:create-invoice/datecreated/month]</intacct:month>
+					<intacct:day>#[xpath:create-invoice/datecreated/day]</intacct:day>
+				</intacct:datecreated>
+				<intacct:customerid>#[xpath:create-invoice/customerid]</intacct:customerid>
+				<intacct:datedue>
+					<intacct:year>#[xpath:create-invoice/datedue/year]</intacct:year>
+					<intacct:month>#[xpath:create-invoice/datedue/month]</intacct:month>
+					<intacct:day>#[xpath:create-invoice/datedue/day]</intacct:day>
+				</intacct:datedue>
+				<intacct:sotransitems>
+					<intacct:sotransitem>
+						<intacct:itemid>#[xpath:create-invoice/invoiceitems/lineitem/productcode]</intacct:itemid>
+						<intacct:itemdesc>#[xpath:create-invoice/invoiceitems/lineitem/memo]</intacct:itemdesc>
+						<intacct:warehouseid>WH1</intacct:warehouseid>
+						<intacct:quantity>#[xpath:create-invoice/invoiceitems/lineitem/quantity]</intacct:quantity>
+						<intacct:unit>Each</intacct:unit>
+						<intacct:revrectemplate>#[xpath:create-invoice/invoiceitems/lineitem/revrectemplate]</intacct:revrectemplate>
+						<intacct:revrecstartdate>
+							<intacct:year>#[xpath:create-invoice/invoiceitems/lineitem/revrecstartdate/year]</intacct:year>
+							<intacct:month>#[xpath:create-invoice/invoiceitems/lineitem/revrecstartdate/month]</intacct:month>
+							<intacct:day>#[xpath:create-invoice/invoiceitems/lineitem/revrecstartdate/day]</intacct:day>
+						</intacct:revrecstartdate>
+						<intacct:revrecenddate>
+							<intacct:year>#[xpath:create-invoice/invoiceitems/lineitem/revrecenddate/year]</intacct:year>
+							<intacct:month>#[xpath:create-invoice/invoiceitems/lineitem/revrecenddate/month]</intacct:month>
+							<intacct:day>#[xpath:create-invoice/invoiceitems/lineitem/revrecenddate/day]</intacct:day>
+						</intacct:revrecenddate>
+
+					</intacct:sotransitem>
+				</intacct:sotransitems>
+			</intacct:create-sotransaction>
+
+		</intacct:function>
+
+
+		<transformer ref="jaxbit" />
+
+		<logger message="Result from Intacct #[payload:]" level="ERROR" />
+
+		<message-filter>
+			<expression-filter expression="response/operation/result/status != 'success'"
+				evaluator="xpath" />
+		</message-filter>
+		<logger message="Print when error" level="ERROR" />
+		<flow-ref name="NotifcationOfError" />
+		<default-exception-strategy>
+			<flow-ref name="NotifcationOfError" />
+		</default-exception-strategy>
+
+	</flow>

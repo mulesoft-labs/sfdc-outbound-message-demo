@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<response>
+	<control>
+		<status>success</status>
+		<senderid>mulesoft</senderid>
+		<controlid>testalbinkjellin</controlid>
+		<uniqueid>false</uniqueid>
+		<dtdversion>2.1</dtdversion>
+	</control>
+	<operation>
+		<authentication>
+			<status>success</status>
+			<userid>admin</userid>
+			<companyid>MuleSource-DEV</companyid>
+		</authentication>
+		<result>
+			<status>failure</status>
+			<function>create_customer</function>
+			<controlid>invoice-12345</controlid>
+			<errormessage>
+				<error>
+					<errorno>BL34000061</errorno>
+					<description></description>
+					<description2>Another Contact with the given value(s) already
+						exists</description2>
+					<correction>Use a unique value instead.</correction>
+				</error>
+				<error>
+					<errorno>BL01001973</errorno>
+					<description></description>
+					<description2>Could not create Contact record!</description2>
+					<correction></correction>
+				</error>
+				<error>
+					<errorno>BL01001973</errorno>
+					<description></description>
+					<description2>Error While Saving the Display Contact</description2>
+					<correction></correction>
+				</error>
+				<error>
+					<errorno>BL01001973</errorno>
+					<description></description>
+					<description2>Could not create Customer record!</description2>
+					<correction></correction>
+				</error>
+			</errormessage>
+		</result>
+	</operation>
+</response>

@@ -1,0 +1,104 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns="http://www.mulesoft.org/schema/mule/core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xmlns:spring="http://www.springframework.org/schema/beans" xmlns:file="http://www.mulesoft.org/schema/mule/file"
+	xmlns:http="http://www.mulesoft.org/schema/mule/http" xmlns:jdbc="http://www.mulesoft.org/schema/mule/jdbc"
+	xmlns:jms="http://www.mulesoft.org/schema/mule/jms" xmlns:vm="http://www.mulesoft.org/schema/mule/vm"
+	xmlns:cxf="http://www.mulesoft.org/schema/mule/cxf" xmlns:script="http://www.mulesoft.org/schema/mule/scripting"
+	xmlns:mule-xml="http://www.mulesoft.org/schema/mule/xml" xmlns:client="http://www.mulesoft.org/schema/mule/client"
+	xmlns:salesforce="http://www.mulesoft.org/schema/mule/salesforce"
+	xmlns:intacct="http://repository.mulesoft.org/releases/org/mule/modules/mule-module-intacct"
+	xmlns:context="http://www.springframework.org/schema/context"
+	xmlns:smtp="http://www.mulesoft.org/schema/mule/smtp"
+	xsi:schemaLocation="
+        http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/3.2/mule.xsd
+        http://www.mulesoft.org/schema/mule/file http://www.mulesoft.org/schema/mule/file/3.2/mule-file.xsd
+        http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/3.2/mule-http.xsd
+        http://www.mulesoft.org/schema/mule/jdbc http://www.mulesoft.org/schema/mule/jdbc/3.2/mule-jdbc.xsd
+        http://www.mulesoft.org/schema/mule/jms http://www.mulesoft.org/schema/mule/jms/3.2/mule-jms.xsd
+        http://www.mulesoft.org/schema/mule/vm http://www.mulesoft.org/schema/mule/vm/3.2/mule-vm.xsd
+        http://www.mulesoft.org/schema/mule/cxf http://www.mulesoft.org/schema/mule/cxf/3.2/mule-cxf.xsd
+        http://www.mulesoft.org/schema/mule/scripting http://www.mulesoft.org/schema/mule/scripting/3.2/mule-scripting.xsd
+        http://www.mulesoft.org/schema/mule/xml http://www.mulesoft.org/schema/mule/xml/3.2/mule-xml.xsd
+        http://www.mulesoft.org/schema/mule/client http://www.mulesoft.org/schema/mule/client/3.2/mule-client.xsd
+        http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans-3.0.xsd
+        http://www.mulesoft.org/schema/mule/salesforce http://www.mulesoft.org/schema/mule/salesforce/3.2/mule-salesforce.xsd
+        http://repository.mulesoft.org/releases/org/mule/modules/mule-module-intacct http://repository.mulesoft.org/releases/org/mule/modules/mule-module-intacct/1.0-SNAPSHOT/mule-intacct.xsd
+        http://www.springframework.org/schema/context http://www.springframework.org/schema/context/spring-context-3.0.xsd
+        http://www.mulesoft.org/schema/mule/smtp http://www.mulesoft.org/schema/mule/smtp/3.2/mule-smtp.xsd">
+
+	<description>
+		Intacct Testing
+	</description>
+
+	<context:property-placeholder location="login.properties" />
+
+	<intacct:config senderId="${intacct.senderId}"
+		controlPassword="${intacct.controlPassword}" controlid="${intacct.controlid}"
+		uniqueid="${intacct.uniqueid}" userid="${intacct.userid}"
+		userPassword="${intacct.userPassword}" companyid="${intacct.companyid}" />
+
+	<vm:endpoint name="bridge" path="bridge" exchange-pattern="one-way" />
+
+	<!-- Main Testing flow. -->
+	<flow name="TestIntacct">
+		<inbound-endpoint ref="bridge" exchange-pattern="one-way" />
+		<logger message="Start Test flow = #[payload:]" level="ERROR" />
+
+		<!-- <intacct:function controlid="#[mule:message.id]"> -->
+			<intacct:create-sotransaction functionControlId="#[mule:message.id]" transactionType="Sales Invoice" customerId="${intacct.companyid}">
+				<!-- <intacct:transactiontype>Sales Invoice</intacct:transactiontype> -->
+				<intacct:datecreated>
+					<intacct:year>2011</intacct:year>
+					<intacct:month>9</intacct:month>
+					<intacct:day>15</intacct:day>
+				</intacct:datecreated>
+				<intacct:customerid>MU00010--Test New Seeding5</intacct:customerid>
+				<intacct:datedue>
+					<intacct:year>2011</intacct:year>
+					<intacct:month>10</intacct:month>
+					<intacct:day>15</intacct:day>
+				</intacct:datedue>
+				<intacct:sotransitems>
+					<intacct:sotransitem>
+						<intacct:itemid>MuleMdi1xRoyalty</intacct:itemid>
+						<intacct:itemdesc>MDI 1x Royalty</intacct:itemdesc>
+						<intacct:warehouseid>WH1</intacct:warehouseid>
+						<intacct:quantity>1</intacct:quantity>
+						<intacct:unit>Each</intacct:unit>
+						<intacct:revrectemplate>12MOSL</intacct:revrectemplate>
+						<intacct:revrecstartdate>
+							<intacct:year>2011</intacct:year>
+							<intacct:month>9</intacct:month>
+							<intacct:day>15</intacct:day>
+						</intacct:revrecstartdate>
+						<intacct:revrecenddate>
+							<intacct:year>2012</intacct:year>
+							<intacct:month>9</intacct:month>
+							<intacct:day>14</intacct:day>
+						</intacct:revrecenddate>
+					</intacct:sotransitem>
+				</intacct:sotransitems>
+			</intacct:create-sotransaction>
+		<!-- </intacct:function> -->
+
+		<transformer ref="jaxbit" />
+
+		<logger message="Result from Intacct #[payload:]" level="ERROR" />
+
+	</flow>
+
+	<script:transformer name="jaxbit">
+		<script:script engine="groovy">
+			<![CDATA[
+				import javax.xml.bind.*
+				import javax.xml.namespace.QName
+				println 'In groovy transformer Intacct'
+				JAXBContext context = JAXBContext.newInstance(payload.class);
+				StringWriter sw = new StringWriter();
+				context.createMarshaller().marshal(new JAXBElement(new QName("response"),payload.class,payload),sw)
+				return sw.toString()
+				]]>
+		</script:script>
+	</script:transformer>
+
+</mule>

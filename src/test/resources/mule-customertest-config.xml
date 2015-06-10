@@ -1,0 +1,155 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns="http://www.mulesoft.org/schema/mule/core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xmlns:spring="http://www.springframework.org/schema/beans" xmlns:file="http://www.mulesoft.org/schema/mule/file"
+	xmlns:http="http://www.mulesoft.org/schema/mule/http" xmlns:jdbc="http://www.mulesoft.org/schema/mule/jdbc"
+	xmlns:jms="http://www.mulesoft.org/schema/mule/jms" xmlns:vm="http://www.mulesoft.org/schema/mule/vm"
+	xmlns:cxf="http://www.mulesoft.org/schema/mule/cxf" xmlns:script="http://www.mulesoft.org/schema/mule/scripting"
+	xmlns:mule-xml="http://www.mulesoft.org/schema/mule/xml" xmlns:client="http://www.mulesoft.org/schema/mule/client"
+	xmlns:sfdc="http://www.mulesoft.org/schema/mule/sfdc"
+	xmlns:intacct="http://repository.mulesoft.org/releases/org/mule/modules/mule-module-intacct"
+	xmlns:context="http://www.springframework.org/schema/context"
+	xmlns:smtp="http://www.mulesoft.org/schema/mule/smtp"
+	xmlns:mappack="http://www.mulesoft.org/schema/mule/mappack"
+	xsi:schemaLocation="
+        http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/3.2/mule.xsd
+        http://www.mulesoft.org/schema/mule/file http://www.mulesoft.org/schema/mule/file/3.2/mule-file.xsd
+        http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/3.2/mule-http.xsd
+        http://www.mulesoft.org/schema/mule/jdbc http://www.mulesoft.org/schema/mule/jdbc/3.2/mule-jdbc.xsd
+        http://www.mulesoft.org/schema/mule/jms http://www.mulesoft.org/schema/mule/jms/3.2/mule-jms.xsd
+        http://www.mulesoft.org/schema/mule/vm http://www.mulesoft.org/schema/mule/vm/3.2/mule-vm.xsd
+        http://www.mulesoft.org/schema/mule/cxf http://www.mulesoft.org/schema/mule/cxf/3.2/mule-cxf.xsd
+        http://www.mulesoft.org/schema/mule/scripting http://www.mulesoft.org/schema/mule/scripting/3.2/mule-scripting.xsd
+        http://www.mulesoft.org/schema/mule/xml http://www.mulesoft.org/schema/mule/xml/3.2/mule-xml.xsd
+        http://www.mulesoft.org/schema/mule/client http://www.mulesoft.org/schema/mule/client/3.2/mule-client.xsd
+        http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans-3.0.xsd
+        http://www.mulesoft.org/schema/mule/sfdc http://www.mulesoft.org/schema/mule/sfdc/4.0/mule-sfdc.xsd
+        http://repository.mulesoft.org/releases/org/mule/modules/mule-module-intacct http://repository.mulesoft.org/releases/org/mule/modules/mule-module-intacct/1.0-SNAPSHOT/mule-intacct.xsd
+        http://www.springframework.org/schema/context http://www.springframework.org/schema/context/spring-context-3.0.xsd
+        http://www.mulesoft.org/schema/mule/smtp http://www.mulesoft.org/schema/mule/smtp/3.2/mule-smtp.xsd
+        http://www.mulesoft.org/schema/mule/mappack http://www.mulesoft.org/schema/mule/mappack/3.2/mule-mappack.xsd">
+
+	<description>
+		Test customer creation
+	</description>
+
+	<context:property-placeholder location="credentials.dev.properties" />
+
+	<intacct:config senderId="${intacct.senderId}" controlPassword="${intacct.controlPassword}" controlId="${intacct.controlid}" uniqueId="${intacct.uniqueid}" userId="${intacct.userid}"
+		userPassword="${intacct.userPassword}" companyId="${intacct.companyid}" />
+
+    <flow name="MapCustomerFlow">
+        <vm:inbound-endpoint path="mapcustomer.in" exchange-pattern="request-response" />
+        
+		<script:transformer>
+			<script:script engine="groovy" file="CreateContactsTest.groovy" />
+		</script:transformer>
+        
+        <enricher>
+        	<mappack:nested-map-transformer single-map="true" to-object-list="true">
+        		<mappack:mapvalue map-key="value" value="Print" />
+        	</mappack:nested-map-transformer>
+        	<enrich target="#[variable:deliveryoption]" source="#[payload]" />
+        </enricher>
+
+        <mappack:nested-map-transformer to-object-list="true">
+        
+            <mappack:mapvalue map-key="name" value="#[string:Random Test Customer #[header:session:randomid]]"/>
+            <mappack:mapvalue map-key="status" value="active"/>
+  
+            <mappack:mapvalue map-name="customerid" map-key="value" value="#[header:session:randomid]"/>
+                     
+            <mappack:mapvalue map-name="deliveryoptions" map-key="deliveryoption" value="#[variable:deliveryoption]" not-string="true" />
+            <mappack:mapvalue map-name="contactinfo" map-key="contactOrContactname" value="#[header:session:contacts]" not-string="true" />
+
+			<!-- Ordering starts here -->
+
+            <mappack:maporder child-map="customerid" />
+            <mappack:maporder child-map="contactinfo" />
+            <mappack:maporder child-map="deliveryoptions" />
+
+        </mappack:nested-map-transformer>
+    </flow>
+    
+    <flow name="MapCustomerUpdateFlow">
+    	<vm:inbound-endpoint path="mapcustomerupdate.in" exchange-pattern="request-response" />
+    	
+ 		<script:transformer>
+			<script:script engine="groovy" file="CreateUpdateContactsTest.groovy" />
+		</script:transformer>   	
+		
+        <mappack:nested-map-transformer to-object-list="true">
+        
+            <mappack:mapvalue map-key="customerid" value="#[string:#[header:session:randomid]--Random Test Customer #[header:session:randomid]]"/>
+            <mappack:mapvalue map-name="contactinfo" map-key="contactOrContactname" value="#[header:session:updatecontacts]" not-string="true" />
+
+			<!-- Ordering starts here -->
+
+            <mappack:maporder child-map="contactinfo" />
+
+        </mappack:nested-map-transformer>		    	
+    	
+    </flow>
+    
+    <flow name="CreateCustomerFlow">
+    
+		<vm:inbound-endpoint path="createcustomer.in" exchange-pattern="request-response" />
+		
+		<script:transformer>
+			<script:script engine="groovy" file="RandomNumberGenerator.groovy" />
+		</script:transformer>
+		
+		<message-properties-transformer scope="session">
+			<add-message-property key="billingcontact" value="#[string:random contact - #[header:session:randomid]]" />
+		</message-properties-transformer>
+		
+		<flow-ref name="MapCustomerFlow"/>
+		<logger message="Pre payload: + #[payload]" level="INFO"/>
+    	<flow-ref name="IntacctCreateCustomerFlow" /> 
+		<script:transformer>
+			<script:script engine="groovy" file="JAXBit.groovy" />
+		</script:transformer>
+		<logger message="Post payload: + #[payload]" level="INFO"/>
+		<choice>
+			<when expression="/response/operation/result/status != 'success'" evaluator="xpath">
+				<logger message="Result Error" level="ERROR" />
+			</when>
+			<otherwise>
+				<logger message="Result Success" level="INFO" />
+			</otherwise>
+		</choice>
+		
+		<flow-ref name="MapCustomerUpdateFlow"/>
+		<logger message="Pre Update payload: + #[payload]" level="INFO"/>
+    	<flow-ref name="IntacctUpdateCustomerFlow" /> 
+		<script:transformer>
+			<script:script engine="groovy" file="JAXBit.groovy" />
+		</script:transformer>
+		<logger message="Post Update payload: + #[payload]" level="INFO"/>
+		<choice>
+			<when expression="/response/operation/result/status != 'success'" evaluator="xpath">
+				<logger message="Result Error" level="ERROR" />
+			</when>
+			<otherwise>
+				<logger message="Result Success" level="INFO" />
+			</otherwise>
+		</choice>
+		
+    </flow>
+
+	<flow name="IntacctCreateCustomerFlow">
+		<vm:inbound-endpoint path="intacctcreatecustomer.in" exchange-pattern="request-response" />
+		<intacct:execute type="CreateCustomer" functionControlId="#[string:invoice- #[mule:message.id]]">
+			<intacct:commands ref="#[payload]" />
+		</intacct:execute>
+
+	</flow>
+
+	<flow name="IntacctUpdateCustomerFlow">
+		<vm:inbound-endpoint path="intacctupdatecustomer.in" exchange-pattern="request-response" />
+		<intacct:execute type="UpdateCustomer" functionControlId="#[string:update- #[mule:message.id]]">
+			<intacct:commands ref="#[payload]" />
+		</intacct:execute>
+
+	</flow>
+
+</mule>

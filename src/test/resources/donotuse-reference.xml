@@ -1,0 +1,443 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns="http://www.mulesoft.org/schema/mule/core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xmlns:spring="http://www.springframework.org/schema/beans" xmlns:http="http://www.mulesoft.org/schema/mule/http"
+	xmlns:quartz="http://www.mulesoft.org/schema/mule/quartz" xmlns:vm="http://www.mulesoft.org/schema/mule/vm"
+	xmlns:script="http://www.mulesoft.org/schema/mule/scripting"
+	xmlns:client="http://www.mulesoft.org/schema/mule/client"
+	xmlns:zuora="http://repository.mulesoft.org/releases/org/mule/modules/mule-module-zuora"
+	xmlns:intacct="http://repository.mulesoft.org/releases/org/mule/modules/mule-module-intacct"
+	xmlns:context="http://www.springframework.org/schema/context"
+	xmlns:mule-xml="http://www.mulesoft.org/schema/mule/xml" xmlns:smtp="http://www.mulesoft.org/schema/mule/smtp"
+	xsi:schemaLocation="
+		http://www.springframework.org/schema/context http://www.springframework.org/schema/context/spring-context-3.1.xsd
+        http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/3.1/mule.xsd
+        http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/3.1/mule-http.xsd
+        http://www.mulesoft.org/schema/mule/quartz http://www.mulesoft.org/schema/mule/quartz/3.1/mule-quartz.xsd
+        http://www.mulesoft.org/schema/mule/vm http://www.mulesoft.org/schema/mule/vm/3.1/mule-vm.xsd
+        http://www.mulesoft.org/schema/mule/scripting http://www.mulesoft.org/schema/mule/scripting/3.1/mule-scripting.xsd
+        http://www.mulesoft.org/schema/mule/client http://www.mulesoft.org/schema/mule/client/3.1/mule-client.xsd
+        http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans-3.0.xsd
+        http://repository.mulesoft.org/releases/org/mule/modules/mule-module-zuora http://repository.mulesoft.org/releases/org/mule/modules/mule-module-zuora/1.0/mule-zuora.xsd
+        http://repository.mulesoft.org/releases/org/mule/modules/mule-module-intacct http://repository.mulesoft.org/releases/org/mule/modules/mule-module-intacct/1.0-SNAPSHOT/mule-intacct.xsd
+        http://www.mulesoft.org/schema/mule/xml http://www.mulesoft.org/schema/mule/xml/3.1/mule-xml.xsd
+        http://www.mulesoft.org/schema/mule/smtp http://www.mulesoft.org/schema/mule/smtp/3.1/mule-smtp.xsd">
+
+	<description>
+
+	</description>
+
+	<context:property-placeholder location="mule.${mule.env}.properties" />
+
+	<zuora:config name="z-conn" username="${zuora.user}"
+		password="${zuora.password}" endpoint="${zuora.url}" />
+
+	<intacct:config senderId="${intacct.senderId}"
+		controlPassword="${intacct.controlPassword}" controlid="${intacct.controlid}"
+		uniqueid="${intacct.uniqueid}" userid="${intacct.userid}"
+		userPassword="${intacct.userPassword}" companyid="${intacct.companyid}" />
+
+	<smtp:gmail-connector name="email" />
+
+	<flow name="inboundinvoice">
+		<http:inbound-endpoint host="localhost" port="8881"
+			path="cfntest" />
+
+		<zuora:find
+			zquery="select AccountID,Amount,CreatedDate,InvoiceNumber,DueDate,Comments from Invoice where invoicenumber='INV00000020'" />
+		<custom-transformer
+			class="org.mule.application.cfn.ZObjectListToMapTransformer" />
+		<collection-splitter enableCorrelation="NEVER" />
+		<vm:outbound-endpoint exchange-pattern="one-way"
+			path="invoice.splitted" />
+
+
+	</flow>
+	<flow name="outboundinvoice">
+		<vm:inbound-endpoint exchange-pattern="one-way"
+			path="invoice.splitted" />
+
+		<logger message="#[map-payload:createdDate]" level="ERROR" />
+		<enricher>
+			<processor-chain>
+				<zuora:find
+					zquery="select AccountNumber,PaymentTerm from Account where Id='#[map-payload:accountId]'" />
+			</processor-chain>
+			<enrich target="#[variable:account]"
+				source="#[groovy:payload.iterator().next().getAt('accountNumber')]" />
+			<enrich target="#[variable:paymentTerm]"
+				source="#[groovy:payload.iterator().next().getAt('paymentTerm')]" />
+		</enricher>
+		<enricher>
+			<processor-chain>
+				<flow-ref name="getitems" />
+			</processor-chain>
+
+			<enrich target="#[variable:items]" source="#[payload:]" />
+		</enricher>
+		<logger message="After header enricher #[payload:]" level="ERROR" />
+
+
+		<script:transformer name="combineAccountAndInvoice">
+			<script:script engine="groovy"><![CDATA[
+				payload.put('accountNumber', message.getInvocationProperty('account'))
+				payload.put('paymentTerm', message.getInvocationProperty('paymentTerm'))
+				def itemlist = []
+				message.getInvocationProperty('items').each{
+					def lineMap = [:]
+					lineMap.put('itemid', ['value':it.get('circuitid')])
+					lineMap.put('quantity', it.get('quantity'))
+					lineMap.put('unit', it.get('UOM'))
+					lineMap.put('price', it.get('unitPrice'))
+					itemlist.add(lineMap)
+				
+				}
+				payload.put('items', ['sotransitem' : itemlist])
+				println 'Complete Invoice = '+payload
+				return payload
+												
+			]]>
+			</script:script>
+		</script:transformer>
+		<enricher>
+			<processor-chain>
+				<logger message="After everything = #[map-payload:createdDate]"
+					level="ERROR" />
+				<expression-transformer evaluator="map-payload"
+					expression="createdDate" />
+
+			</processor-chain>
+			<enrich target="#[variable:createdDate]"
+				source="#[groovy:['year': payload.getYear(), 'month':payload.getMonth(), 'day':payload.getDay()]]" />
+		</enricher>
+		<logger message="Created Date = #[variable:createdDate]" level="ERROR" />
+		<enricher>
+			<processor-chain>
+				<logger message="After everything = #[map-payload:dueDate]"
+					level="ERROR" />
+				<expression-transformer evaluator="map-payload"
+					expression="dueDate" />
+
+			</processor-chain>
+			<enrich target="#[variable:dueDate]"
+				source="#[groovy:['year': payload.getYear(), 'month':payload.getMonth(), 'day':payload.getDay()]]" />
+		</enricher>
+		<message-properties-transformer scope="invocation">
+			<add-message-property key="invoice" value="#[payload:]" />
+		</message-properties-transformer>
+
+		<logger message="Due Date = #[variable:dueDate]" level="ERROR" />
+		<logger message="Items = #[groovy:payload.get('items').getClass()]"
+			level="ERROR" />
+
+		<intacct:create-sotransaction
+			functionControlId="#[mule:message.id]" transactionType="Sales Invoice"
+			customerId="#[map-payload:accountNumber]" termName="#[map-payload:paymentTerm]"
+			referenceNo="#[map-payload:invoiceNumber]">
+			<intacct:date-created ref="#[variable:createdDate]" />
+			<intacct:date-due ref="#[variable:dueDate]" />
+			<intacct:so-trans-items ref="#[map-payload:items]" />
+		</intacct:create-sotransaction>
+		<logger message="Intacct Response #[groovy: payload.getClass()]"
+			level="ERROR" />
+
+		<transformer ref="jaxbit" />
+		<logger message="Intacct Response #[groovy: payload]" level="ERROR" />
+		<choice>
+			<when evaluator="xpath" expression="/response/operation/result/status='success'">
+				<logger
+					message="Invoice created in intacct #[xpath: /response/operation/result/key]"
+					level="ERROR" />
+
+				<script:transformer name="createUpdateZuoraObject">
+					<script:script engine="groovy"><![CDATA[
+						def resultMap = [:]
+						resultMap.put('id', message.getInvocationProperty('invoice').get('id'))
+						resultMap.put('transferredToAccounting', 'Yes')
+						return [resultMap]
+												
+						]]>
+					</script:script>
+				</script:transformer>
+
+				<zuora:update type="Invoice">
+					<zuora:zobjects ref="#[payload:]" />
+				</zuora:update>
+
+			</when>
+			<otherwise>
+				<logger message="Failed to create Invoice" level="ERROR" />
+				<expression-transformer evaluator="string"
+					expression="The following invoice could not be transfered to Intacct: Invoice ID = #[groovy:message.getInvocationProperty('invoice').get('id')] Invoice Number #[groovy:message.getInvocationProperty('invoice').get('invoiceNumber')] Exception: #[paylpad:]" />
+
+				<smtp:outbound-endpoint host="smtp.gmail.com"
+					port="587" user="${gmail.user}" password="${gmail.password}" from="${gmail.user}"
+					to="${gmail.to.email}" subject="CFN Invoice Transfer Problem"
+					connector-ref="email" />
+			</otherwise>
+		</choice>
+
+
+
+		<default-exception-strategy>
+			<flow-ref name="NotifcationOfError" />
+		</default-exception-strategy>
+	</flow>
+
+	<flow name="getitems">
+		<zuora:find
+			zquery="select ProductDescription,Quantity,UOM,UnitPrice,ChargeAmount,RevRecCode,RevRecStartDate,SubscriptionId from InvoiceItem where InvoiceId='#[map-payload:id]'" />
+		<custom-transformer
+			class="org.mule.application.cfn.ZObjectListToMapTransformer" />
+		<logger message="in getitem before collection splitter #[payload:]"
+			level="ERROR" />
+
+		<collection-splitter />
+		<flow-ref name="getcircuit" />
+		<collection-aggregator />
+
+	</flow>
+
+	<flow name="getcircuit">
+		<logger message="in getitem after collection splitter #[payload:]"
+			level="ERROR" />
+		<enricher>
+			<processor-chain>
+				<zuora:find
+					zquery="select CircuitID__c from Subscription where id='#[map-payload:subscriptionId]'" />
+				<custom-transformer
+					class="org.mule.application.cfn.ZObjectListToMapTransformer" />
+				<logger message="in query sub #[payload:]" level="ERROR" />
+			</processor-chain>
+
+			<enrich target="#[variable:circuitid]" source="#[groovy:payload.first().get('CircuitID__c')]" />
+		</enricher>
+		<logger message="in getitem after enricher #[payload:]" level="ERROR" />
+		<script:transformer name="addcircuitidToItem">
+			<script:script engine="groovy"><![CDATA[
+				def cid = message.getInvocationProperty('circuitid')
+				println cid.getClass()
+				if(cid instanceof org.mule.transport.NullPayload){
+					payload.put('circuitid',null )
+				}else{
+					payload.put('circuitid',cid )
+				}
+				return payload
+												
+			]]>
+			</script:script>
+		</script:transformer>
+		<logger message="in getitem after groovy script #[payload:]"
+			level="ERROR" />
+
+
+
+
+	</flow>
+
+	<script:transformer name="jaxbit">
+		<script:script engine="groovy">
+			<![CDATA[
+				import javax.xml.bind.*
+				import javax.xml.namespace.QName
+				JAXBContext context = JAXBContext.newInstance(payload.getClass());
+				StringWriter sw = new StringWriter();
+				context.createMarshaller().marshal(new JAXBElement(new QName("response"),payload.class,payload),sw)
+				return sw.toString()
+				]]>
+		</script:script>
+	</script:transformer>
+
+
+
+	<flow name="inboundpayment">
+		<http:inbound-endpoint host="localhost" port="8881"
+			path="payment" />
+
+
+
+		<intacct:get-list functionControlId="#[mule:message.id]"
+			object="arpayment">
+			<intacct:fields
+				ref="#[groovy:['field':[['value':'customerid'],['value':'paymentamount'],['value':'paymentapplied'],['value':'paymentunapplied'],['value':'refid'],['value':'datereceived'],['value':'paymentmethod'],['value':'arpaymentitems'],['value':'arpaymentitemdetails'],['value':'lineitems'] ]]]" />
+
+
+		</intacct:get-list>
+		<transformer ref="jaxbit" />
+		<logger message="#[payload:]" level="ERROR" />
+		<splitter expression="/response/operation/result/data/arpayment"
+			evaluator="xpath" enableCorrelation="NEVER" />
+
+		<vm:outbound-endpoint path="splitted.payment"
+			exchange-pattern="one-way" />
+
+
+	</flow>
+	<flow name="perpayment">
+		<vm:inbound-endpoint path="splitted.payment"
+			exchange-pattern="one-way" />
+		<mule-xml:dom-to-xml-transformer />
+		<logger
+			message="#[xpath:arpayment/arpaymentitems/arpaymentitem[1]/invoicekey]"
+			level="ERROR" />
+
+		<enricher>
+			<processor-chain>
+				<intacct:get functionControlId="Get Invoice #[mule:message.id]"
+					object="invoice"
+					key="#[xpath:arpayment/arpaymentitems/arpaymentitem[1]/invoicekey]">
+					<intacct:fields
+						ref="#[groovy:['field':[ ['value':'invoiceno'],['value':'ponumber']]]]" />
+				</intacct:get>
+				<transformer ref="jaxbit" />
+			</processor-chain>
+			<enrich target="#[variable:zuorainvoiceid]"
+				source="#[xpath:/response/operation/result/data/invoice/ponumber]" />
+		</enricher>
+		<logger message="*#[variable:zuorainvoiceid]*" level="ERROR" />
+		<logger message="#[payload:]" level="ERROR" />
+
+
+
+
+		<choice>
+			<when evaluator="variable" expression="zuorainvoiceid !=">
+				<message-properties-transformer
+					scope="invocation">
+					<add-message-property key="eYear"
+						value="#[xpath:arpayment/datereceived/year]" />
+					<add-message-property key="eMonth"
+						value="#[xpath:arpayment/datereceived/month]" />
+					<add-message-property key="eDay"
+						value="#[xpath:arpayment/datereceived/day]" />
+				</message-properties-transformer>
+
+				<logger message="#[variable:eYear]" level="ERROR" />
+				<logger message="#[variable:eMonth]" level="ERROR" />
+				<logger message="#[variable:eDay]" level="ERROR" />
+				<script:transformer name="datefix">
+					<script:script engine="groovy">
+					<![CDATA[
+						import javax.xml.datatype.XMLGregorianCalendar;
+						import javax.xml.datatype.DatatypeFactory;
+				
+						GregorianCalendar c = new GregorianCalendar(message.getInvocationProperty('eYear').toInteger(),message.getInvocationProperty('eMonth').toInteger() , message.getInvocationProperty('eDay').toInteger());
+						XMLGregorianCalendar effectiveDate = null
+						effectiveDate = DatatypeFactory.newInstance().newXMLGregorianCalendar(c)
+						message.setInvocationProperty('formattedEdate', effectiveDate)
+						return payload
+					]]>
+					</script:script>
+				</script:transformer>
+
+				<enricher>
+					<processor-chain>
+						<zuora:find
+							zquery="select InvoiceNumber from Invoice where InvoiceNumber ='#[variable:zuorainvoiceid]'" />
+
+					</processor-chain>
+					<enrich target="#[variable:invoiceid]"
+						source="#[groovy:payload.iterator().next().getAt('id')]" />
+				</enricher>
+
+				<enricher>
+					<processor-chain>
+						<zuora:find
+							zquery="select DefaultPaymentMethodId from Account where AccountNumber ='#[xpath:arpayment/customerid]'" />
+						<logger
+							message="***********#[groovy:payload.iterator().next().getAt('defaultPaymentMethodId')]"
+							level="ERROR" />
+					</processor-chain>
+					<enrich target="#[variable:paymentMethodId]"
+						source="#[groovy:payload.iterator().next().getAt('defaultPaymentMethodId')]" />
+					<enrich target="#[variable:accountId]"
+						source="#[groovy:payload.iterator().next().getAt('id')]" />
+				</enricher>
+
+				<logger message="the payment method is #[variable:paymentMethodId]"
+					level="ERROR" />
+				<zuora:create type="Payment">
+					<zuora:zobjects>
+						<zuora:zobject>
+							<AccountID>#[variable:accountId]</AccountID>
+							<AppliedCreditBalanceAmount>#[xpath:arpayment/paymentunapplied]</AppliedCreditBalanceAmount>
+							<AppliedInvoiceAmount>#[xpath:arpayment/paymentapplied]</AppliedInvoiceAmount>
+							<EffectiveDate>#[variable:formattedEdate]</EffectiveDate>
+							<InvoiceId>#[variable:invoiceid]</InvoiceId>
+							<InvoiceNumber>#[variable:zuorainvoiceid]</InvoiceNumber>
+							<PaymentMethodID>#[variable:paymentMethodId]</PaymentMethodID>
+							<ReferenceId>#[xpath:arpayment/refid]</ReferenceId>
+							<Status>Processed</Status>
+							<Type>External</Type>
+						</zuora:zobject>
+					</zuora:zobjects>
+				</zuora:create>
+				<!-- <custom-transformer -->
+				<!-- class="org.mule.application.cfn.ZObjectListToMapTransformer" /> -->
+				<logger message="#[payload:]" level="ERROR" />
+			</when>
+			<otherwise>
+				<logger message="Invoice id is null" level="ERROR" />
+			</otherwise>
+		</choice>
+
+		<default-exception-strategy>
+			<flow-ref name="NotifcationOfError" />
+		</default-exception-strategy>
+	</flow>
+
+
+	<flow name="testinvoicekeys">
+		<http:inbound-endpoint host="localhost" port="8881"
+			path="arpayments" />
+
+
+		<script:transformer name="buildfilter">
+			<script:script engine="groovy">
+					<![CDATA[
+						
+						import org.mule.module.intacct.schema.request.Expression;
+						import org.mule.module.intacct.schema.request.Field;
+						import org.mule.module.intacct.schema.request.Value;
+						
+						def expression = new Expression()
+						
+						def field = new Field()
+						field.setvalue('whenmodified')
+						def year = new Field()
+						year.setvalue('year')						
+						def value = new Value()
+						value.setvalue('09/26/2011')
+						expression.setField(field)
+						expression.setOperator('>')
+						expression.setValue(value)
+						return ['logicalOrExpression':[expression]]
+						
+					]]>
+			</script:script>
+		</script:transformer>
+		<intacct:get-list functionControlId="#[mule:message.id]"
+			object="arpayment">
+			<intacct:filter ref="#[payload:]" />
+
+			<intacct:fields
+				ref="#[groovy:['field':[['value':'customerid'],['value':'paymentamount'],['value':'paymentapplied'],['value':'whenmodified'],['value':'refid'],['value':'datereceived'],['value':'paymentmethod'],['value':'arpaymentitems'],['value':'arpaymentitemdetails'],['value':'lineitems'],['value':'state'] ]]]" />
+
+
+		</intacct:get-list>
+		<transformer ref="jaxbit" />
+	</flow>
+
+	<flow name="NotifcationOfError">
+
+		<expression-transformer evaluator="string"
+			expression="There was an error processing the following invoice: #[groovy:message.getInvocationProperty('invoice').get('invoiceNumber')] #[payload:]" />
+
+		<smtp:outbound-endpoint host="smtp.gmail.com"
+			port="587" user="${gmail.user}" password="${gmail.password}" from="${gmail.user}"
+			to="${gmail.to.email}" subject="CFN General Exception" connector-ref="email" />
+
+	</flow>
+
+
+
+</mule>

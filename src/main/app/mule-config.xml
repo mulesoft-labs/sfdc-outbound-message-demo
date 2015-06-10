@@ -1,0 +1,147 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns="http://www.mulesoft.org/schema/mule/core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xmlns:spring="http://www.springframework.org/schema/beans" 
+	xmlns:file="http://www.mulesoft.org/schema/mule/file"
+	xmlns:http="http://www.mulesoft.org/schema/mule/http" 
+	xmlns:jdbc="http://www.mulesoft.org/schema/mule/jdbc"
+	xmlns:jms="http://www.mulesoft.org/schema/mule/jms" 
+	xmlns:vm="http://www.mulesoft.org/schema/mule/vm"
+	xmlns:cxf="http://www.mulesoft.org/schema/mule/cxf" 
+	xmlns:script="http://www.mulesoft.org/schema/mule/scripting"
+	xmlns:mule-xml="http://www.mulesoft.org/schema/mule/xml" 
+	xmlns:client="http://www.mulesoft.org/schema/mule/client"
+	xmlns:sfdc="http://www.mulesoft.org/schema/mule/sfdc"
+	xmlns:context="http://www.springframework.org/schema/context"
+	xmlns:smtp="http://www.mulesoft.org/schema/mule/smtp"
+	xmlns:quartz="http://www.mulesoft.org/schema/mule/quartz"
+	xsi:schemaLocation="
+        http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+        http://www.mulesoft.org/schema/mule/file http://www.mulesoft.org/schema/mule/file/current/mule-file.xsd
+        http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+        http://www.mulesoft.org/schema/mule/jdbc http://www.mulesoft.org/schema/mule/jdbc/current/mule-jdbc.xsd
+        http://www.mulesoft.org/schema/mule/jms http://www.mulesoft.org/schema/mule/jms/current/mule-jms.xsd
+        http://www.mulesoft.org/schema/mule/vm http://www.mulesoft.org/schema/mule/vm/current/mule-vm.xsd
+        http://www.mulesoft.org/schema/mule/cxf http://www.mulesoft.org/schema/mule/cxf/current/mule-cxf.xsd
+        http://www.mulesoft.org/schema/mule/scripting http://www.mulesoft.org/schema/mule/scripting/current/mule-scripting.xsd
+        http://www.mulesoft.org/schema/mule/xml http://www.mulesoft.org/schema/mule/xml/current/mule-xml.xsd
+        http://www.mulesoft.org/schema/mule/client http://www.mulesoft.org/schema/mule/client/current/mule-client.xsd
+        http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans-3.0.xsd
+        http://www.mulesoft.org/schema/mule/sfdc http://www.mulesoft.org/schema/mule/sfdc/current/mule-sfdc.xsd
+        http://www.springframework.org/schema/context http://www.springframework.org/schema/context/spring-context-3.0.xsd
+        http://www.mulesoft.org/schema/mule/smtp http://www.mulesoft.org/schema/mule/smtp/current/mule-smtp.xsd
+        http://www.mulesoft.org/schema/mule/quartz http://www.mulesoft.org/schema/mule/quartz/current/mule-quartz.xsd">
+
+	<description>
+		SFDC to Intacct Won Opportunity -> Invoice integration for internal
+		consumption
+	</description>
+
+	<context:property-placeholder location="credentials.${mule.env}.properties" />
+
+	<sfdc:config name="salesforce" username="${sfdc.username}" password="${sfdc.password}" securityToken="${sfdc.securityToken}" url="${sfdc.url}" />
+
+	<smtp:gmail-connector name="email" />
+	
+	<flow name="SFOutboundTrigger">
+		<http:inbound-endpoint host="localhost" port="${http.port}"
+			path="closed/opportunity" exchange-pattern="request-response">
+			<cxf:jaxws-service
+				serviceClass="com.mulesoft.salesforce.outbound.generated.NotificationPort" />
+		</http:inbound-endpoint>
+
+		<component class="com.mulesoft.salesforce.outbound.OpportunityTrigger" />
+		<logger message="payload is: #[payload]" level="INFO" />
+		<!-- Get just first row since payload is List -->		
+		<expression-transformer evaluator="groovy" expression="return payload[0]" />
+		<outbound-endpoint ref="opportunity" exchange-pattern="request-response" />
+		<expression-transformer>
+			<return-argument evaluator="groovy" expression="true" />
+		</expression-transformer>
+
+		<default-exception-strategy>
+			<flow-ref name="NotificationOfError" />
+		</default-exception-strategy>
+	</flow>
+
+	<!-- SFDC Account Check Flow -->
+	<flow name="sync-async-sync">
+		<inbound-endpoint ref="opportunity" exchange-pattern="request-response" />
+		<logger message="Input is: #[payload]" level="INFO" />
+		<message-properties-transformer scope="session">
+			<add-message-property key="opportunity"
+				value="#[groovy:return payload.sObject.getId()]" />
+			<add-message-property key="account"
+				value="#[groovy:return payload.sObject.getAccountId().getValue()]" />
+			<add-message-property key="billingcontact"
+				value="#[groovy:return payload.sObject.getBilling_Contact_Email__c().getValue()]" />
+		</message-properties-transformer>
+<!--  		<flow-ref name="process-account" /> -->
+	</flow>
+	
+	<flow name="process-account">
+		<vm:inbound-endpoint path="processaccount.in" exchange-pattern="request-response" />
+		<sfdc:query-single
+			query="SELECT AccountNumber FROM Account WHERE Id='#[header:session:account]'" retryMax="2" />
+		<!-- Need this since null results are handled differently now -->
+		<script:transformer name="newCustomerTransformer">
+			<script:script engine="groovy"><![CDATA[
+				String accountnumber = payload.get('AccountNumber');
+				if (accountnumber == null || accountnumber =="{}" || accountnumber =="") {
+					message.setSessionProperty("newcustomer", true);
+				}  
+				else {
+					message.setSessionProperty("intacctaccountid", accountnumber);
+				}
+				return payload;
+            	]]>
+			</script:script>
+		</script:transformer>
+		<choice>
+			<when evaluator="header" expression="session:newcustomer=true">
+				<expression-transformer>
+					<return-argument evaluator="header" expression="session:account" />
+				</expression-transformer>
+				<outbound-endpoint ref="customer" exchange-pattern="request-response"/>
+			</when>
+			<otherwise>
+				<logger message="Customer already exists" level="WARN" />
+				<flow-ref name="updatecustomer"/>
+			</otherwise>
+		</choice>
+
+		<logger message="opportunity = #[header:session:opportunity]"
+			level="INFO" />
+		<expression-transformer>
+			<return-argument evaluator="header" expression="session:opportunity" />
+		</expression-transformer>
+
+		<outbound-endpoint ref="bridge" exchange-pattern="request-response" />
+
+		<default-exception-strategy>
+			<flow-ref name="NotificationOfError" />
+		</default-exception-strategy>
+
+	</flow>
+
+	<flow name="SFDCOperationError">
+		<choice>
+			<when expression="payload.toString().indexOf('success=\'false\'') > 0" evaluator="groovy">
+				<logger message="SFDC Operation Error + #[payload]" level="ERROR" />
+				<flow-ref name="NotificationOfError" />
+			</when>
+			<otherwise>
+				<logger message="SFDC Operation Success + #[payload]" level="INFO" />
+			</otherwise>
+		</choice>	
+	</flow>
+
+	<flow name="NotificationOfError">
+		<object-to-string-transformer />
+		<smtp:outbound-endpoint host="smtp.gmail.com"
+			port="587" user="${gmail.user}" password="${gmail.password}" from="${gmail.user}"
+			to="${gmail.to.email}" subject="Sales Force Intacct Exception"
+			connector-ref="email" />
+
+	</flow>
+
+</mule>
