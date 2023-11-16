@@ -8,10 +8,10 @@
 	<packaging>mule</packaging>
 	<name>Mule SalesForceToIntacct Application</name>
 	<version>1.0-SNAPSHOT</version>
-	<description></description>
+	<description/>
 
 	<properties>
-		<mule.version>3.2.1</mule.version>
+		<mule.version>3.8.0</mule.version>
 		<!-- Tools properties -->
 		<eclipsePluginVersion>2.5</eclipsePluginVersion>
 		<vmtype>org.eclipse.jdt.internal.debug.ui.launcher.StandardVMType</vmtype>
@@ -118,8 +118,7 @@
 						</goals>
 						<configuration>
 							<tasks>
-								<copy file="${project.build.directory}/${build.finalName}.zip"
-									todir="${env.MULE_HOME}/apps" overwrite="true" />
+								<copy file="${project.build.directory}/${build.finalName}.zip" todir="${env.MULE_HOME}/apps" overwrite="true"/>
 							</tasks>
 						</configuration>
 					</execution>
